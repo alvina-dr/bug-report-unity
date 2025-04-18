@@ -3,28 +3,27 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
-using static UnityEngine.Experimental.Rendering.RayTracingAccelerationStructure;
 
-public class UI_DrawOnImage : MonoBehaviour, IDragHandler
+public class UI_DrawOnImage : MonoBehaviour, IDragHandler, IEndDragHandler
 {
     // The image we are going to edit at runtime
-    private Image drawImage;
+    private Image _drawImage;
     // The sprite that the Image component references
-    private Sprite drawSprite;
+    private Sprite _drawSprite;
     // The texture of the drawSprite, the actual .png you are editing
-    private Texture2D drawTexture;
+    private Texture2D _drawTexture;
     private RectTransform _rectTransform;
 
     //The position of the mouse in the last frame
-    Vector2 previousDragPosition;
+    Vector2 _previousDragPosition;
 
     //The array used to reset the image to be empty
-    Color[] resetColorsArray;
+    Color[] _resetColorsArray;
     //The color filled into the "resetColorsArray"
-    Color resetColor;
+    Color _resetColor;
 
     //The color array of the changes to be applied
-    Color32[] currentColors;
+    Color32[] _currentColors;
 
     [Header("Paint settings")]
     [SerializeField] private Color _paintColor;
@@ -33,69 +32,18 @@ public class UI_DrawOnImage : MonoBehaviour, IDragHandler
     void Awake()
     {
         _rectTransform = GetComponent<RectTransform>();
-        drawImage = GetComponent<Image>();
+        _drawImage = GetComponent<Image>();
 
-        resetColor = new Color(0, 0, 0, 0);
-    }
-
-    private void Update()
-    {
-        KeyboardInput();
+        _resetColor = new Color(0, 0, 0, 0);
     }
 
     //Call this whenever the image this script is attached has changed
     //most uses can probably simply call initalize at the beginning
     public void Initialize()
     {
-        drawSprite = drawImage.sprite;
-        drawTexture = drawSprite.texture;
-
-        // fill the array with our reset color so it can be easily reset later on
-        resetColorsArray = new Color[(int)drawSprite.rect.width * (int)drawSprite.rect.height];
-        for (int x = 0; x < resetColorsArray.Length; x++)
-            resetColorsArray[x] = resetColor;
-    }
-
-    void KeyboardInput()
-    {
-        // We have different undo/redo controls in the editor,
-        // so that way you don't accidentally undo something in the scene
-#if UNITY_EDITOR
-        bool isShiftHeldDown = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
-        bool isZHeldDown = Input.GetKeyDown(KeyCode.Z);
-        bool isYHeldDown = Input.GetKeyDown(KeyCode.Y);
-
-        //if (isShiftHeldDown &&
-        //    isZHeldDown &&
-        //    drawSettings.CanUndo())
-        //{
-        //    // if there's something to undo, pull the last state off of the stack, and apply those changes
-        //    currentColors = drawSettings.Undo(drawTexture.GetPixels32());
-        //    ApplyCurrentColors();
-        //}
-
-        //if (isShiftHeldDown &&
-        //isYHeldDown &&
-        //    drawSettings.CanRedo())
-        //{
-        //    currentColors = drawSettings.Redo(drawTexture.GetPixels32());
-        //    ApplyCurrentColors();
-        //}
-        //These controls only take effect if we build the game! See: Platform dependent compilation
-#else
-        bool isControlHeldDown = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
-        bool isZHeldDown = Input.GetKeyDown(KeyCode.Z);
-        if (isControlHeldDown && isZHeldDown) {
-            if (Input.GetKey(KeyCode.LeftShift) && 
-                drawViewModel.CanRedo()) {
-                currentColors = drawViewModel.Redo(drawTexture.GetPixels32());
-                ApplyCurrentColors();
-            } else if (drawViewModel.CanUndo()) {
-                currentColors = drawViewModel.Undo(drawTexture.GetPixels32());
-                ApplyCurrentColors();
-            }
-        }
-#endif
+        _drawSprite = _drawImage.sprite;
+        _drawTexture = _drawSprite.texture;
+        _resetColorsArray = _drawTexture.GetPixels();
     }
 
     public void OnDrag(PointerEventData eventData)
@@ -109,22 +57,26 @@ public class UI_DrawOnImage : MonoBehaviour, IDragHandler
         }
 
         //Check if the cursor is over the image
-        if (localCursor.x < _rectTransform.rect.width &&
-            localCursor.y < _rectTransform.rect.height &&
-            localCursor.x > 0 &&
-            localCursor.y > 0)
+        if (localCursor.x < _rectTransform.rect.width / 2 &&
+            localCursor.y < _rectTransform.rect.height / 2 &&
+            localCursor.x > -_rectTransform.rect.width / 2 &&
+            localCursor.y > -_rectTransform.rect.height / 2)
         {
-            float rectToPixelScale = drawImage.sprite.rect.width / _rectTransform.rect.width;
-            localCursor = new Vector2(localCursor.x * rectToPixelScale, localCursor.y * rectToPixelScale);
+            float rectToPixelScale = _drawImage.sprite.rect.width / _rectTransform.rect.width;
+            localCursor = new Vector2(localCursor.x * rectToPixelScale + _drawSprite.rect.width / 2, localCursor.y * rectToPixelScale + _drawSprite.rect.height / 2);
             Paint(localCursor);
-            previousDragPosition = localCursor;
+            _previousDragPosition = localCursor;
         }
         else
         {
-            previousDragPosition = Vector2.zero;
+            _previousDragPosition = Vector2.zero;
         }
+    }
 
-
+    //Reset the previosDragPosition so that our brush knows the next drag is a new line
+    public void OnEndDrag(PointerEventData eventData)
+    {
+        _previousDragPosition = Vector2.zero;
     }
 
     // Pass in a point in PIXEL coordinates
@@ -132,9 +84,9 @@ public class UI_DrawOnImage : MonoBehaviour, IDragHandler
     public void Paint(Vector2 pixelPosition)
     {
         //grab the current image state
-        currentColors = drawTexture.GetPixels32();
+        _currentColors = _drawTexture.GetPixels32();
 
-        if (previousDragPosition == Vector2.zero)
+        if (_previousDragPosition == Vector2.zero)
         {
             // If this is the first frame in a drag, color the pixels around the mouse
             MarkPixelsToColour(pixelPosition);
@@ -142,11 +94,11 @@ public class UI_DrawOnImage : MonoBehaviour, IDragHandler
         else
         {
             // Color between where we are this frame, and where our mouse was last frame
-            ColorBetween(previousDragPosition, pixelPosition);
+            ColorBetween(_previousDragPosition, pixelPosition);
         }
         ApplyCurrentColors();
 
-        previousDragPosition = pixelPosition;
+        _previousDragPosition = pixelPosition;
     }
 
     //Color the pixels around the centerPoint
@@ -158,7 +110,7 @@ public class UI_DrawOnImage : MonoBehaviour, IDragHandler
         for (int x = centerX - _pencilSize; x <= centerX + _pencilSize; x++)
         {
             // Check if the X wraps around the image, so we don't draw pixels on the other side of the image
-            if (x >= (int)drawSprite.rect.width || x < 0)
+            if (x >= (int)_drawSprite.rect.width || x < 0)
                 continue;
 
             for (int y = centerY - _pencilSize; y <= centerY + _pencilSize; y++)
@@ -189,28 +141,28 @@ public class UI_DrawOnImage : MonoBehaviour, IDragHandler
     public void MarkPixelToChange(int x, int y)
     {
         // Need to transform x and y coordinates to flat coordinates of array
-        int arrayPosition = (y * (int)drawSprite.rect.width) + x;
+        int arrayPosition = (y * (int)_drawSprite.rect.width) + x;
 
         // Check if this is a valid position
-        if (arrayPosition > currentColors.Length || arrayPosition < 0)
+        if (arrayPosition > _currentColors.Length || arrayPosition < 0)
         {
             return;
         }
 
-        currentColors[arrayPosition] = _paintColor;
+        _currentColors[arrayPosition] = _paintColor;
     }
 
     public void ApplyCurrentColors()
     {
-        drawTexture.SetPixels32(currentColors);
-        drawTexture.Apply();
+        _drawTexture.SetPixels32(_currentColors);
+        _drawTexture.Apply();
     }
 
     // Changes every pixel to be the reset colour
     public void ResetTexture()
     {
-        drawTexture.SetPixels(resetColorsArray);
-        drawTexture.Apply();
+        _drawTexture.SetPixels(_resetColorsArray);
+        _drawTexture.Apply();
     }
 
 }
